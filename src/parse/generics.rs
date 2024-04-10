@@ -114,12 +114,13 @@ impl Generics {
         result
     }
 
-    pub(crate) fn impl_generics_with_additional_lifetimes(
+    pub(crate) fn impl_generics_with_additional(
         &self,
-        lifetime: &[String],
+        lifetimes: &[String],
+        types: &[String],
     ) -> StreamBuilder {
         let mut result = StreamBuilder::new();
-        for (idx, lt) in lifetime.iter().enumerate() {
+        for (idx, lt) in lifetimes.iter().enumerate() {
             result.punct(if idx == 0 { '<' } else { ',' });
             result.lifetime_str(lt);
         }
@@ -127,6 +128,10 @@ impl Generics {
         for generic in self.iter() {
             result.punct(',');
             generic.append_to_result_with_constraints(&mut result);
+        }
+        for ty in types {
+            result.punct(',');
+            result.ident_str(ty);
         }
 
         result.punct('>');
