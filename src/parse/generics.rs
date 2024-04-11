@@ -120,17 +120,31 @@ impl Generics {
         types: &[String],
     ) -> StreamBuilder {
         let mut result = StreamBuilder::new();
-        for (idx, lt) in lifetimes.iter().enumerate() {
-            result.punct(if idx == 0 { '<' } else { ',' });
+        result.punct('<');
+        let mut is_first = true;
+        for lt in lifetimes.iter() {
+            if !is_first {
+                result.punct(',');
+            } else {
+                is_first = false;
+            }
             result.lifetime_str(lt);
         }
 
         for generic in self.iter() {
-            result.punct(',');
+            if !is_first {
+                result.punct(',');
+            } else {
+                is_first = false;
+            }
             generic.append_to_result_with_constraints(&mut result);
         }
         for ty in types {
-            result.punct(',');
+            if !is_first {
+                result.punct(',');
+            } else {
+                is_first = false;
+            }
             result.ident_str(ty);
         }
 

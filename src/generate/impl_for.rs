@@ -362,7 +362,7 @@ fn append_lifetimes_and_generics(
         if idx > 0 || !lifetimes.is_empty() {
             builder.punct(',');
         }
-        builder.ident_str(gen);
+        builder.push_parsed(gen).unwrap();
     }
 
     builder.punct('>');
