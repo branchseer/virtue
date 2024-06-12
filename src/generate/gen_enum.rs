@@ -1,5 +1,5 @@
 use super::{Impl, ImplFor, Parent, StreamBuilder, StringOrIdent};
-use crate::parse::Visibility;
+use crate::parse::{Generic, Generics, Visibility};
 use crate::prelude::{Delimiter, Ident, Span};
 use crate::Result;
 
@@ -42,6 +42,7 @@ pub struct GenEnum<'a, P: Parent> {
     parent: &'a mut P,
     name: Ident,
     visibility: Visibility,
+    generics: Option<Generics>,
     values: Vec<EnumValue>,
     additional: Vec<StreamBuilder>,
 }
@@ -52,6 +53,7 @@ impl<'a, P: Parent> GenEnum<'a, P> {
             parent,
             name: Ident::new(name.into().as_str(), Span::call_site()),
             visibility: Visibility::Default,
+            generics: None,
             values: Vec::new(),
             additional: Vec::new(),
         }
@@ -60,6 +62,96 @@ impl<'a, P: Parent> GenEnum<'a, P> {
     /// Make the enum `pub`. By default the struct will have no visibility modifier and will only be visible in the current scope.
     pub fn make_pub(&mut self) -> &mut Self {
         self.visibility = Visibility::Pub;
+        self
+    }
+
+    /// Inherit the generic parameters of the parent type.
+    ///
+    /// ```
+    /// # use virtue::prelude::Generator;
+    /// # use virtue::parse::{Generic, Lifetime};
+    /// # use proc_macro2::{Ident, Span};
+    /// # let mut generator = Generator::with_name("Bar").with_lifetime("a");
+    /// // given a derive on enum Bar<'a>
+    /// generator
+    ///     .generate_enum("Foo")
+    ///     .inherit_generics()
+    ///     .add_value("Bar")
+    ///     .make_tuple()
+    ///     .add_field("bar", "&'a str");
+    /// # generator.assert_eq("enum Foo < 'a > { Bar (&'a str ,) , }");
+    /// # Ok::<_, virtue::Error>(())
+    /// ```
+    ///
+    /// Generates:
+    /// ```ignore
+    /// // given a derive on enum Bar<'a>
+    /// enum Foo<'a> {
+    ///     Bar(&'a str)
+    /// }
+    /// ```
+    pub fn inherit_generics(&mut self) -> &mut Self {
+        self.generics = self.parent.generics().cloned();
+        self
+    }
+
+    /// Append generic parameters to the type.
+    ///
+    /// ```
+    /// # use virtue::prelude::Generator;
+    /// # use virtue::parse::{Generic, Lifetime};
+    /// # use proc_macro2::{Ident, Span};
+    /// # let mut generator = Generator::with_name("Bar").with_lifetime("a");
+    /// generator
+    ///     .generate_enum("Foo")
+    ///     .with_generics([Lifetime { ident: Ident::new("a", Span::call_site()), constraint: vec![] }.into()])
+    ///     .add_value("Bar")
+    ///     .make_tuple()
+    ///     .add_field("bar", "&'a str");
+    /// # generator.assert_eq("enum Foo < 'a > { Bar (&'a str ,) , }");
+    /// # Ok::<_, virtue::Error>(())
+    /// ```
+    ///
+    /// Generates:
+    /// ```ignore
+    /// enum Foo<'a> {
+    ///     Bar(&'a str)
+    /// }
+    /// ```
+    pub fn with_generics(&mut self, generics: impl IntoIterator<Item = Generic>) -> &mut Self {
+        self.generics
+            .get_or_insert_with(|| Generics(Vec::new()))
+            .extend(generics);
+        self
+    }
+
+    /// Add a generic parameter to the type.
+    ///
+    /// ```
+    /// # use virtue::prelude::Generator;
+    /// # use virtue::parse::{Generic, Lifetime};
+    /// # use proc_macro2::{Ident, Span};
+    /// # let mut generator = Generator::with_name("Bar").with_lifetime("a");
+    /// generator
+    ///     .generate_enum("Foo")
+    ///     .with_generic(Lifetime { ident: Ident::new("a", Span::call_site()), constraint: vec![] }.into())
+    ///     .add_value("Bar")
+    ///     .make_tuple()
+    ///     .add_field("bar", "&'a str");
+    /// # generator.assert_eq("enum Foo < 'a > { Bar (&'a str ,) , }");
+    /// # Ok::<_, virtue::Error>(())
+    /// ```
+    ///
+    /// Generates:
+    /// ```ignore
+    /// enum Foo<'a> {
+    ///     Bar(&'a str)
+    /// }
+    /// ```
+    pub fn with_generic(&mut self, generic: Generic) -> &mut Self {
+        self.generics
+            .get_or_insert_with(|| Generics(Vec::new()))
+            .push(generic);
         self
     }
 
@@ -100,8 +192,8 @@ impl<'a, P: Parent> Parent for GenEnum<'a, P> {
         &self.name
     }
 
-    fn generics(&self) -> Option<&crate::parse::Generics> {
-        None
+    fn generics(&self) -> Option<&Generics> {
+        self.generics.as_ref()
     }
 
     fn generic_constraints(&self) -> Option<&crate::parse::GenericConstraints> {
@@ -118,6 +210,11 @@ impl<'a, P: Parent> Drop for GenEnum<'a, P> {
         builder
             .ident_str("enum")
             .ident(self.name.clone())
+            .append(
+                self.generics()
+                    .map(Generics::impl_generics)
+                    .unwrap_or_default(),
+            )
             .group(Delimiter::Brace, |b| {
                 for value in &self.values {
                     build_value(b, value)?;
