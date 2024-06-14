@@ -1,6 +1,10 @@
-use super::{Impl, ImplFor, Parent, StreamBuilder, StringOrIdent};
+use super::{
+    AttributeContainer, Field, FieldBuilder, Impl, ImplFor, Parent, Path, StreamBuilder,
+    StringOrIdent,
+};
 use crate::parse::{Generic, Generics, Visibility};
-use crate::prelude::{Delimiter, Ident, Span};
+use crate::prelude::{Delimiter, Ident, Span, TokenStream};
+use crate::Result;
 
 /// Builder to generate a struct.
 /// Defaults to a struct with named fields `struct <Name> { <field>: <ty>, ... }`
@@ -9,7 +13,9 @@ pub struct GenStruct<'a, P: Parent> {
     name: Ident,
     visibility: Visibility,
     generics: Option<Generics>,
-    fields: Vec<StructField>,
+    fields: Vec<Field>,
+    derives: Vec<Path>,
+    attributes: Vec<StreamBuilder>,
     additional: Vec<StreamBuilder>,
     struct_type: StructType,
 }
@@ -22,6 +28,8 @@ impl<'a, P: Parent> GenStruct<'a, P> {
             visibility: Visibility::Default,
             generics: None,
             fields: Vec::new(),
+            derives: Vec::new(),
+            attributes: Vec::new(),
             additional: Vec::new(),
             struct_type: StructType::Named,
         }
@@ -165,7 +173,136 @@ impl<'a, P: Parent> GenStruct<'a, P> {
         self
     }
 
-    /// Add a *private* field to the struct. For adding a public field, see `add_pub_field`
+    /// Add a derive macro to the struct.
+    ///
+    /// ```
+    /// # use virtue::prelude::Generator;
+    /// # use virtue::generate::Path;
+    /// # let mut generator = Generator::with_name("Bar");
+    /// generator
+    ///     .generate_struct("Foo")
+    ///     .with_derive("Clone")
+    ///     .with_derive("Default")
+    ///     .with_derive(Path::from_iter(vec!["serde", "Deserialize"]));
+    /// # generator.assert_eq("# [derive (Clone , Default , serde ::Deserialize)] struct Foo { }");
+    /// # Ok::<_, virtue::Error>(())
+    /// ```
+    ///
+    /// Generates:
+    /// ```ignore
+    /// #[derive(Clone, Default, serde::Deserialize)]
+    /// struct Foo { }
+    /// ```
+    pub fn with_derive(&mut self, derive: impl Into<Path>) -> &mut Self {
+        AttributeContainer::with_derive(self, derive)
+    }
+
+    /// Add derive macros to the struct.
+    ///
+    /// ```
+    /// # use virtue::prelude::Generator;
+    /// # use virtue::generate::Path;
+    /// # let mut generator = Generator::with_name("Bar");
+    /// generator
+    ///     .generate_struct("Foo")
+    ///     .with_derives([
+    ///         "Clone".into(),
+    ///         "Default".into(),
+    ///         Path::from_iter(vec!["serde", "Deserialize"]),
+    ///     ]);
+    /// # generator.assert_eq("# [derive (Clone , Default , serde ::Deserialize)] struct Foo { }");
+    /// # Ok::<_, virtue::Error>(())
+    /// ```
+    ///
+    /// Generates:
+    /// ```ignore
+    /// #[derive(Clone, Default, serde::Deserialize)]
+    /// struct Foo { }
+    /// ```
+    pub fn with_derives<T: Into<Path>>(
+        &mut self,
+        derives: impl IntoIterator<Item = T>,
+    ) -> &mut Self {
+        AttributeContainer::with_derives(self, derives)
+    }
+
+    /// Add an attribute to the struct. For `#[derive(...)]`, use [`with_derive`](Self::with_derive)
+    /// instead.
+    ///
+    /// ```
+    /// # use virtue::prelude::Generator;
+    /// # let mut generator = Generator::with_name("Bar");
+    /// generator
+    ///     .generate_struct("Foo")
+    ///     .with_attribute("serde", |b| {
+    ///         b.push_parsed("(rename_all = \"camelCase\")")?;
+    ///         Ok(())
+    ///     })?;
+    /// # generator.assert_eq("# [serde (rename_all = \"camelCase\")] struct Foo { }");
+    /// # Ok::<_, virtue::Error>(())
+    /// ```
+    ///
+    /// Generates:
+    /// ```ignore
+    /// #[serde(rename_all = "camelCase")]
+    /// struct Foo { }
+    /// ```
+    pub fn with_attribute(
+        &mut self,
+        name: impl AsRef<str>,
+        value: impl FnOnce(&mut StreamBuilder) -> Result,
+    ) -> Result<&mut Self> {
+        AttributeContainer::with_attribute(self, name, value)
+    }
+
+    /// Add a parsed attribute to the struct. For `#[derive(...)]`, use [`with_derive`](Self::with_derive)
+    /// instead.
+    ///
+    /// ```
+    /// # use virtue::prelude::Generator;
+    /// # let mut generator = Generator::with_name("Bar");
+    /// generator
+    ///     .generate_struct("Foo")
+    ///     .with_parsed_attribute("serde(rename_all = \"camelCase\")")?;
+    /// # generator.assert_eq("# [serde (rename_all = \"camelCase\")] struct Foo { }");
+    /// # Ok::<_, virtue::Error>(())
+    /// ```
+    ///
+    /// Generates:
+    /// ```ignore
+    /// #[serde(rename_all = "camelCase")]
+    /// struct Foo { }
+    /// ```
+    pub fn with_parsed_attribute(&mut self, attribute: impl AsRef<str>) -> Result<&mut Self> {
+        AttributeContainer::with_parsed_attribute(self, attribute)
+    }
+
+    /// Add a token stream as an attribute to the struct. For `#[derive(...)]`, use
+    /// [`with_derive`](Self::with_derive) instead.
+    ///
+    /// ```
+    /// # use virtue::prelude::{Generator, TokenStream};
+    /// # use std::str::FromStr;
+    /// # let mut generator = Generator::with_name("Bar");
+    ///
+    /// let attribute = "serde(rename_all = \"camelCase\")".parse::<TokenStream>().unwrap();
+    /// generator
+    ///     .generate_struct("Foo")
+    ///     .with_attribute_stream(attribute);
+    /// # generator.assert_eq("# [serde (rename_all = \"camelCase\")] struct Foo { }");
+    /// # Ok::<_, virtue::Error>(())
+    /// ```
+    ///
+    /// Generates:
+    /// ```ignore
+    /// #[serde(rename_all = "camelCase")]
+    /// struct Foo { }
+    /// ```
+    pub fn with_attribute_stream(&mut self, attribute: impl Into<TokenStream>) -> &mut Self {
+        AttributeContainer::with_attribute_stream(self, attribute)
+    }
+
+    /// Add a field to the struct.
     ///
     /// Names are ignored when the Struct's fields are unnamed
     ///
@@ -187,25 +324,14 @@ impl<'a, P: Parent> GenStruct<'a, P> {
     ///     baz: String,
     /// };
     /// ```
-    pub fn add_field(&mut self, name: impl Into<String>, ty: impl Into<String>) -> &mut Self {
-        self.fields.push(StructField {
-            name: name.into(),
-            vis: Visibility::Default,
-            ty: ty.into(),
-        });
-        self
-    }
-
-    /// Add a *public* field to the struct. For adding a public field, see `add_field`
-    ///
-    /// Names are ignored when the Struct's fields are unnamed
-    pub fn add_pub_field(&mut self, name: impl Into<String>, ty: impl Into<String>) -> &mut Self {
-        self.fields.push(StructField {
-            name: name.into(),
-            vis: Visibility::Pub,
-            ty: ty.into(),
-        });
-        self
+    pub fn add_field(
+        &mut self,
+        name: impl Into<String>,
+        ty: impl Into<String>,
+    ) -> FieldBuilder<Self> {
+        let mut fields = FieldBuilder::from(&mut self.fields);
+        fields.add_field(name, ty);
+        fields
     }
 
     /// Add an `impl <name> for <struct>`
@@ -225,6 +351,16 @@ impl<'a, P: Parent> GenStruct<'a, P> {
     /// [`impl`]: #method.impl
     pub fn generate_impl(&mut self) -> Impl<Self> {
         Impl::with_parent_name(self)
+    }
+}
+
+impl<P: Parent> AttributeContainer for GenStruct<'_, P> {
+    fn derives(&mut self) -> &mut Vec<Path> {
+        &mut self.derives
+    }
+
+    fn attributes(&mut self) -> &mut Vec<StreamBuilder> {
+        &mut self.attributes
     }
 }
 
@@ -248,7 +384,12 @@ impl<'a, P: Parent> Parent for GenStruct<'a, P> {
 
 impl<'a, P: Parent> Drop for GenStruct<'a, P> {
     fn drop(&mut self) {
+        use std::mem::take;
         let mut builder = StreamBuilder::new();
+
+        self.build_derives(&mut builder)
+            .build_attributes(&mut builder);
+
         if self.visibility == Visibility::Pub {
             builder.ident_str("pub");
         }
@@ -261,7 +402,8 @@ impl<'a, P: Parent> Drop for GenStruct<'a, P> {
         match self.struct_type {
             StructType::Named => builder
                 .group(Delimiter::Brace, |b| {
-                    for field in &self.fields {
+                    for field in self.fields.iter_mut() {
+                        field.build_attributes(b);
                         if field.vis == Visibility::Pub {
                             b.ident_str("pub");
                         }
@@ -275,7 +417,8 @@ impl<'a, P: Parent> Drop for GenStruct<'a, P> {
                 .expect("Could not build struct"),
             StructType::Unnamed => builder
                 .group(Delimiter::Parenthesis, |b| {
-                    for field in &self.fields {
+                    for field in self.fields.iter_mut() {
+                        field.build_attributes(b);
                         if field.vis == Visibility::Pub {
                             b.ident_str("pub");
                         }
@@ -288,7 +431,7 @@ impl<'a, P: Parent> Drop for GenStruct<'a, P> {
             StructType::Zst => builder.punct(';'),
         };
 
-        for additional in std::mem::take(&mut self.additional) {
+        for additional in take(&mut self.additional) {
             builder.append(additional);
         }
         self.parent.append(builder);
@@ -299,10 +442,4 @@ enum StructType {
     Named,
     Unnamed,
     Zst,
-}
-
-struct StructField {
-    name: String,
-    vis: Visibility,
-    ty: String,
 }
